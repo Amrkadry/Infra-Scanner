@@ -6,6 +6,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import argparse
 
 # Configuration
 MAX_THREADS = 10
@@ -25,15 +26,35 @@ def print_status(message, status_type="info"):
     print(f"{colors.get(status_type, '[*]')} {message}")
 
 class NetworkScanner:
-    def __init__(self, input_file, skip_ping=False):
+    def __init__(self, input_file, skip_ping=False, skip_fast=False, skip_full=False, skip_udp=False, skip_snmp=False):
         self.input_file = input_file
         self.output_folder = "nmap_results"
         self.skip_ping = skip_ping
+        self.skip_fast = skip_fast
+        self.skip_full = skip_full
+        self.skip_udp = skip_udp
+        self.skip_snmp = skip_snmp
         self.live_hosts_file = os.path.join(self.output_folder, "live_hosts.txt")
         self.summary_file = os.path.join(self.output_folder, "scan_summary.txt")
         self.udp_summary_file = os.path.join(self.output_folder, "udp_summary.txt")
         self.lock = threading.Lock()
         
+        # Create output directory
+        os.makedirs(self.output_folder, exist_ok=True)
+        
+    def is_valid_ip(self, ip):
+        """Validate IP address format"""
+        parts = ip.split('.')
+        if len(parts) != 4:
+            return False
+        try:
+            for part in parts:
+                if not 0 <= int(part) <= 255:
+                    return False
+            return True
+        except ValueError:
+            return False
+
     def expand_targets(self, targets):
         """Expand CIDR ranges and individual IPs to list of IPs"""
         all_ips = []
@@ -67,7 +88,7 @@ class NetworkScanner:
                 all_ips.append(target)
         
         return all_ips
-        
+    
     def discover_live_hosts(self, target):
         """Discover live hosts using -Pn with port scanning"""
         print_status(f"Discovering live hosts on {target} using -Pn...")
@@ -108,18 +129,6 @@ class NetworkScanner:
         except Exception as e:
             print_status(f"Error in host discovery for {target}: {e}", "error")
             return live_hosts  # Return any hosts found before error
-    def is_valid_ip(self, ip):
-        """Validate IP address format"""
-        parts = ip.split('.')
-        if len(parts) != 4:
-            return False
-        try:
-            for part in parts:
-                if not 0 <= int(part) <= 255:
-                    return False
-            return True
-        except ValueError:
-            return False
     
     def fast_scan_1000(self, ip):
         """Fast scan on top 1000 ports"""
@@ -322,7 +331,7 @@ class NetworkScanner:
         if not all_live_hosts:
             print_status("No live hosts found. Try using --skip-ping if you know hosts are live.", "error")
             return
-        
+
         # Stage 2: Fast scan (top 1000 ports)
         fast_results = []
         if not self.skip_fast:
@@ -439,8 +448,6 @@ class NetworkScanner:
                     f.write(f"{ip} [{status}]: {message}\n")
 
 def main():
-    import argparse
-    
     parser = argparse.ArgumentParser(
         description="Enhanced Multi-Stage Network Scanner",
         formatter_class=argparse.RawDescriptionHelpFormatter,
