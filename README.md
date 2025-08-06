@@ -43,7 +43,7 @@ brew install nmap net-snmp
 
 1. **Clone the repository:**
 ```bash
-git clone https://github.com/yourusername/enhanced-network-scanner.git
+git clone https://github.com/Amrkadry/EIPT-Scanner.git
 cd enhanced-network-scanner
 ```
 
