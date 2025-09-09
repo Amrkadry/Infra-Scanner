@@ -2,6 +2,9 @@
 
 A comprehensive Python-based network scanning tool that performs intelligent host discovery and multi-stage port scanning using Nmap. This tool is designed for penetration testers, security researchers, and network administrators who need thorough network reconnaissance.
 
+<img width="1529" height="507" alt="image" src="https://github.com/user-attachments/assets/6debdcb5-debb-42e2-8fe2-2cba9f1f426b" />
+
+
 ## 🚀 Features
 
 ### Multi-Stage Scanning Architecture
