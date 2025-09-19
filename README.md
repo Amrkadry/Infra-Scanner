@@ -219,15 +219,27 @@ The scanner creates a timestamped output folder:
 
 ```
 infra_scan_[mode]_[timestamp]/
-├── live_hosts.txt                 # List of discovered live hosts
-├── INFRA_SECURITY_REPORT.txt      # Main security report
-├── scan_results.json              # JSON formatted results
-├── detailed_scan.log              # Detailed scan logs
-└── [IP]_[scan_type].txt          # Individual host results
-    ├── 192_168_1_1_top_ports.txt
-    ├── 192_168_1_1_smb_vuln.txt
-    ├── 192_168_1_1_ssl_tls.txt
-    └── ...
+│
+├── 📁 hosts/                     # Individual host results
+│   ├── 192_168_1_1/
+│   │   ├── HOST_SUMMARY.txt      # Quick overview of findings
+│   │   ├── top_ports_scan.txt    # Port scan results
+│   │   ├── top_ports_findings.txt # Extracted findings
+│   │   ├── smb_scan.txt          # SMB scan results
+│   │   └── ...                   # Other scan outputs
+│   │
+│   └── 192_168_1_2/
+│       └── ...
+│
+├── 📁 reports/                    # Consolidated reports
+│   ├── EXECUTIVE_SUMMARY.txt     # Management-level summary
+│   ├── SECURITY_ASSESSMENT_REPORT.txt  # Detailed technical report
+│   ├── live_hosts.txt            # List of discovered hosts
+│   └── scan_results.json         # Machine-readable results
+│
+└── 📁 logs/                       # Scan logs
+    ├── detailed_scan.log         # Complete scan log
+    └── errors.log                # Error tracking
 ```
 
 ### Report Contents
