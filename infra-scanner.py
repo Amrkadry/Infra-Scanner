@@ -946,7 +946,7 @@ Output Structure:
     timing_group = parser.add_argument_group('Timing Profiles')
     timing_group.add_argument('--slow', action='store_true', help='Slow/stealthy scanning (T1)')
     timing_group.add_argument('--normal', action='store_true', help='Normal speed (T2, Normal)')
-    timing_group.add_argument('--Default', action='store_true', help='Normal speed (T3, default)')
+    timing_group.add_argument('--Default', action='store_true', help='Fast speed (T3, default)')
     timing_group.add_argument('--aggressive', action='store_true', help='Fast aggressive scanning (T4)')
     
     # Scan types
