@@ -183,9 +183,10 @@ class SecurityScanner:
         timing_flags = {
             "slow": "-T1",
             "normal": "-T2",
+            "Default":"-T3",
             "aggressive": "-T4"
         }
-        return timing_flags.get(self.timing, "-T2")
+        return timing_flags.get(self.timing, "-T3")
 
     def create_host_folder(self, ip):
         """Create a dedicated folder for each host"""
@@ -944,7 +945,8 @@ Output Structure:
     # Timing profiles
     timing_group = parser.add_argument_group('Timing Profiles')
     timing_group.add_argument('--slow', action='store_true', help='Slow/stealthy scanning (T1)')
-    timing_group.add_argument('--normal', action='store_true', help='Normal speed (T2, default)')
+    timing_group.add_argument('--normal', action='store_true', help='Normal speed (T2, Normal)')
+    timing_group.add_argument('--Default', action='store_true', help='Normal speed (T3, default)')
     timing_group.add_argument('--aggressive', action='store_true', help='Fast aggressive scanning (T4)')
     
     # Scan types
