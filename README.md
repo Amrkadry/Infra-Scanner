@@ -1,27 +1,25 @@
-# Enhanced Multi-Stage Network Scanner
+# Infra Scanner - Advanced Infrastructure Security Assessment Tool
 
-A comprehensive Python-based network scanning tool that performs intelligent host discovery and multi-stage port scanning using Nmap. This tool is designed for penetration testers, security researchers, and network administrators who need thorough network reconnaissance.
+A comprehensive Python-based infrastructure security scanner designed for thorough assessment of both internal and external network infrastructure. This tool provides intelligent host discovery, multi-stage scanning with customizable timing profiles, and detailed vulnerability assessment capabilities.
 
-<img width="1529" height="507" alt="image" src="https://github.com/user-attachments/assets/6debdcb5-debb-42e2-8fe2-2cba9f1f426b" />
+![Infra Scanner Banner](https://img.shields.io/badge/Version-3.0-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.6%2B-green.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
+## 🎯 Key Features
 
-## 🚀 Features
+### Infrastructure Modes
+- **Internal Infrastructure Scanning** - Optimized for Active Directory and internal network assessment
+- **External Infrastructure Scanning** - Controlled scanning for internet-facing assets with timing controls
 
-### Multi-Stage Scanning Architecture
-- **Stage 1**: Host Discovery using `-Pn` with port scanning (bypasses ping blocks)
-- **Stage 2**: Fast Scan on top 1000 ports with service detection
-- **Stage 3**: Full Port Scan on all 65535 ports
-- **Stage 4**: UDP Scan on common ports
-- **Stage 5**: SNMP Configuration Check for misconfigurations
-
-### Advanced Capabilities
-- ✅ **Firewall-Resistant Discovery** - Uses `-Pn` flag to bypass ping blocks
-- ✅ **Multi-threading** - Parallel execution for faster scanning
-- ✅ **Flexible Stage Control** - Skip any stage based on your needs
-- ✅ **Comprehensive Reporting** - Multiple output formats and summaries
-- ✅ **Target Format Support** - Individual IPs, CIDR ranges, and IP ranges
-- ✅ **Error Handling** - Robust timeout and error management
-- ✅ **Progress Tracking** - Real-time colored status updates
+### Advanced Scanning Capabilities
+- ✅ **Flexible Timing Profiles** - Slow/stealthy, normal, or aggressive scanning modes
+- ✅ **Modular Scan Types** - Choose specific scan modules based on requirements
+- ✅ **Switch Explanations** - Automatic explanation of Nmap switches being used
+- ✅ **Smart Host Discovery** - Firewall-aware discovery techniques
+- ✅ **Comprehensive Reporting** - Multiple output formats with severity classification
+- ✅ **Custom Port Specifications** - Define specific ports to scan
+- ✅ **Progress Tracking** - Real-time colored status updates with timing information
 
 ## 📋 Requirements
 
@@ -29,62 +27,63 @@ A comprehensive Python-based network scanning tool that performs intelligent hos
 ```bash
 # Ubuntu/Debian
 sudo apt update
-sudo apt install nmap snmp-utils python3
+sudo apt install nmap python3 python3-pip
 
-# CentOS/RHEL
-sudo yum install nmap net-snmp-utils python3
+# CentOS/RHEL/Fedora
+sudo yum install nmap python3
+# or
+sudo dnf install nmap python3
 
-# macOS (using Homebrew)
-brew install nmap net-snmp
+# macOS
+brew install nmap python3
+
+# Windows (WSL recommended)
+# Install WSL first, then follow Ubuntu/Debian instructions
 ```
 
 ### Python Requirements
-- Python 3.6+
-- Standard library modules (no additional pip packages required)
+- Python 3.6 or higher
+- No additional pip packages required (uses standard library only)
 
 ## 🔧 Installation
 
-1. **Clone the repository:**
+1. **Clone or download the scanner:**
 ```bash
-git clone https://github.com/Amrkadry/EIPT-Scanner.git
-cd enhanced-network-scanner
+# If you have git
+git clone https://github.com/Amrkadry/infra-scanner.git
+cd infra-scanner
+
+# Or download directly
+wget https://raw.githubusercontent.com/Amrkadry/infra-scanner/main/infra_scanner.py
 ```
 
-2. **Make executable:**
+2. **Make the script executable:**
 ```bash
-chmod +x enhanced_nmap.py
+chmod +x infra_scanner.py
 ```
 
 3. **Verify dependencies:**
 ```bash
-nmap --version
-snmpwalk -V
+# Check Python version
 python3 --version
+
+# Check Nmap installation
+nmap --version
 ```
 
-## 📖 Usage
+## 📖 Usage Guide
 
 ### Basic Usage
-```bash
-python3 enhanced_nmap.py targets.txt
-```
 
-### Command Line Options
-
-#### Individual Stage Control
 ```bash
---skip-ping     # Skip host discovery (assume all targets are live)
---skip-fast     # Skip fast scan (top 1000 ports)
---skip-full     # Skip full port scan (all 65535 ports)
---skip-udp      # Skip UDP scan
---skip-snmp     # Skip SNMP configuration check
-```
+# Interactive mode - prompts for scan type
+python3 infra_scanner.py targets.txt
 
-#### Convenience Options
-```bash
---fast-only     # Only run host discovery + fast scan
---tcp-only      # Only TCP scans (skip UDP and SNMP)
---udp-only      # Only host discovery + UDP/SNMP scans
+# Internal infrastructure scan
+python3 infra_scanner.py targets.txt --internal
+
+# External infrastructure scan
+python3 infra_scanner.py targets.txt --external
 ```
 
 ### Target File Format
@@ -96,206 +95,241 @@ Create a `targets.txt` file with one target per line:
 192.168.1.0/24
 10.0.0.1-10
 172.16.1.100
+external.example.com
 ```
 
-**Supported formats:**
+Supported formats:
 - Individual IPs: `192.168.1.1`
 - CIDR notation: `192.168.1.0/24`
 - IP ranges: `192.168.1.1-10`
-- Mixed combinations
+- Hostnames: `example.com`
+
+## ⚙️ Command Line Options
+
+### Scan Modes
+| Option | Description |
+|--------|-------------|
+| `--internal` | Perform internal/AD infrastructure scan |
+| `--external` | Perform external infrastructure scan |
+
+### Timing Profiles
+| Option | Description | Nmap Template | Use Case |
+|--------|-------------|---------------|----------|
+| `--slow` | Slow, stealthy scanning | T1 (Sneaky) | Evading IDS/IPS, minimal network impact |
+| `--normal` | Normal speed (default) | T2 (Polite) | Balanced speed and stealth |
+| `--aggressive` | Fast aggressive scanning | T4 (Aggressive) | Quick results, less concerned about detection |
+
+### Scan Types
+| Option | Description | Ports/Scripts |
+|--------|-------------|---------------|
+| `--top-ports` | Quick scan of top 1000 ports | Top 1000 TCP ports |
+| `--smb-scan` | SMB/NetBIOS enumeration | 139,445 + SMB scripts |
+| `--ssl-scan` | SSL/TLS assessment | 443,636,993,465,8443 + SSL scripts |
+| `--web-scan` | Web application scanning | 80,443,8080,8443 + HTTP scripts |
+| `--vuln-scan` | Comprehensive vulnerability scan | All ports + vuln scripts |
+| `--full-scan` | Complete port scan | All 65535 ports |
+| `--ports PORTS` | Custom port specification | User-defined ports |
+
+### Additional Options
+| Option | Description |
+|--------|-------------|
+| `--skip-discovery` | Skip host discovery (treat all as live) |
 
 ## 💡 Usage Examples
 
-### Quick Network Discovery
+### Quick Assessment Scenarios
+
+#### 1. Fast External Assessment
 ```bash
-# Fast scan only (quickest option)
-python3 enhanced_nmap.py targets.txt --fast-only
+# Quick top ports scan with normal timing
+python3 infra_scanner.py targets.txt --external --top-ports
 ```
 
-### Comprehensive TCP Scanning
+#### 2. Stealthy External Scan
 ```bash
-# Skip time-consuming UDP scans
-python3 enhanced_nmap.py targets.txt --tcp-only
+# Slow, careful scanning to avoid detection
+python3 infra_scanner.py targets.txt --external --slow --top-ports
 ```
 
-### Thorough Network Assessment
+#### 3. Internal AD Assessment
 ```bash
-# Skip only the slow full port scan
-python3 enhanced_nmap.py targets.txt --skip-full
+# Comprehensive internal scan with SMB focus
+python3 infra_scanner.py targets.txt --internal --smb-scan
 ```
 
-### Known Live Hosts
+#### 4. Web Application Security
 ```bash
-# Skip host discovery when targets don't respond to ping
-python3 enhanced_nmap.py targets.txt --skip-ping
+# Focus on web services and SSL/TLS
+python3 infra_scanner.py targets.txt --external --web-scan --ssl-scan
 ```
 
-### UDP Service Discovery
+#### 5. Full Vulnerability Assessment
 ```bash
-# Focus on UDP services and SNMP
-python3 enhanced_nmap.py targets.txt --udp-only
+# Complete scan with all vulnerability checks
+python3 infra_scanner.py targets.txt --external --vuln-scan --full-scan
 ```
 
-### Custom Combinations
+#### 6. Custom Port Scanning
 ```bash
-# Multiple skip options
-python3 enhanced_nmap.py targets.txt --skip-full --skip-udp --skip-snmp
+# Scan specific ports only
+python3 infra_scanner.py targets.txt --ports "22,80,443,3389,8080"
 ```
 
-## 📁 Output Files
-
-The scanner creates a `nmap_results/` directory with the following files:
-
-### Per-Host Results
-- `{ip}-1000.txt` - Fast scan results (top 1000 ports)
-- `{ip}-full.txt` - Full port scan results (all 65535 ports)
-- `{ip}-udp.txt` - UDP scan results
-- `{ip}-snmp.txt` - SNMP configuration check results
-
-### Summary Reports
-- `live_hosts.txt` - List of discovered live hosts
-- `scan_summary.txt` - TCP scan summary for all hosts
-- `udp_summary.txt` - UDP scan summary
-- `snmp_summary.txt` - SNMP vulnerability summary
-
-## 🏗️ Architecture
-
-### Scanning Workflow
-
-```
-📡 Stage 1: Host Discovery
-    ├── Uses: nmap -Pn -sS --top-ports 100
-    ├── Purpose: Find live hosts that respond to port scans
-    └── Output: live_hosts.txt
-
-⚡ Stage 2: Fast Scan  
-    ├── Uses: nmap -Pn -sCV -T4 --top-ports 1000
-    ├── Purpose: Quick service discovery on common ports
-    └── Output: {ip}-1000.txt
-
-🔍 Stage 3: Full Port Scan
-    ├── Uses: nmap -Pn -sCV -T4 -p-
-    ├── Purpose: Comprehensive scan of all 65535 ports
-    └── Output: {ip}-full.txt
-
-📡 Stage 4: UDP Scan
-    ├── Uses: nmap -Pn -sU -T4 -p{common_udp_ports}
-    ├── Purpose: Discover UDP services
-    └── Output: {ip}-udp.txt
-
-🔒 Stage 5: SNMP Check
-    ├── Uses: snmpwalk -v2c -c public
-    ├── Purpose: Check for SNMP misconfigurations
-    └── Output: {ip}-snmp.txt
-```
-
-### Threading Strategy
-- **Host Discovery**: Single-threaded (network topology dependent)
-- **Fast Scan**: Up to 10 concurrent threads
-- **Full Scan**: Up to 5 concurrent threads (resource intensive)
-- **UDP Scan**: Up to 3 concurrent threads (slower protocol)
-- **SNMP Check**: Up to 10 concurrent threads
-
-## ⚙️ Configuration
-
-### Timeout Settings
-```python
-TIMEOUT_PING = 60      # Host discovery timeout
-TIMEOUT_FAST = 300     # Fast scan timeout (5 minutes)
-TIMEOUT_FULL = 1800    # Full scan timeout (30 minutes)
-TIMEOUT_UDP = 900      # UDP scan timeout (15 minutes)
-```
-
-### Thread Limits
-```python
-MAX_THREADS = 10       # Maximum concurrent threads
-```
-
-### UDP Ports Scanned
-```
-53,67,68,69,123,135,137,138,139,161,162,445,500,514,520,631,1434,1900,4500,5353
-```
-
-## 🛡️ Security Considerations
-
-### Legal Usage
-- **Only scan networks you own or have explicit permission to test**
-- Unauthorized network scanning may violate laws and policies
-- Always follow responsible disclosure practices
-
-### Network Impact
-- The tool uses aggressive timing (`-T4`) for faster results
-- Full port scans can generate significant network traffic
-- Consider using `--fast-only` for initial reconnaissance
-
-### Stealth Considerations
-- Uses SYN scanning (`-sS`) which is more stealthy than connect scans
-- Multiple threads may increase detection probability
-- Consider reducing thread count for stealth operations
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-#### "No live hosts found"
+#### 7. Known Live Hosts
 ```bash
-# Try skipping host discovery
-python3 enhanced_nmap.py targets.txt --skip-ping
-
-# Or use fast-only mode
-python3 enhanced_nmap.py targets.txt --fast-only
+# Skip discovery when hosts don't respond to ping
+python3 infra_scanner.py targets.txt --skip-discovery --smb-scan
 ```
 
-#### Permission errors
+#### 8. Aggressive Internal Scan
 ```bash
-# Run with sudo for raw socket access
-sudo python3 enhanced_nmap.py targets.txt
+# Fast internal scan when detection isn't a concern
+python3 infra_scanner.py targets.txt --internal --aggressive --full-scan
 ```
 
-#### Missing dependencies
-```bash
-# Install missing tools
-sudo apt install nmap snmp-utils  # Ubuntu/Debian
-sudo yum install nmap net-snmp-utils  # CentOS/RHEL
+## 📊 Nmap Switches Explained
+
+The scanner automatically explains the Nmap switches being used. Here are the common ones:
+
+### Discovery Switches
+- `-Pn`: Skip host discovery (treat all as online)
+- `-PS`: TCP SYN ping on specified ports
+- `-PA`: TCP ACK ping on specified ports
+- `-PU`: UDP ping on specified ports
+- `-sn`: No port scan (discovery only)
+
+### Scan Types
+- `-sS`: TCP SYN scan (stealth scan)
+- `-sV`: Version detection
+- `-sC`: Run default NSE scripts
+- `-sU`: UDP scan
+
+### Timing Templates
+- `-T0`: Paranoid (5 minutes between probes)
+- `-T1`: Sneaky (15 seconds between probes)
+- `-T2`: Polite (0.4 seconds between probes)
+- `-T3`: Normal (default)
+- `-T4`: Aggressive (faster)
+- `-T5`: Insane (fastest, may miss results)
+
+
+## 📁 Output Structure
+
+The scanner creates a timestamped output folder:
+
+```
+infra_scan_[mode]_[timestamp]/
+├── live_hosts.txt                 # List of discovered live hosts
+├── INFRA_SECURITY_REPORT.txt      # Main security report
+├── scan_results.json              # JSON formatted results
+├── detailed_scan.log              # Detailed scan logs
+└── [IP]_[scan_type].txt          # Individual host results
+    ├── 192_168_1_1_top_ports.txt
+    ├── 192_168_1_1_smb_vuln.txt
+    ├── 192_168_1_1_ssl_tls.txt
+    └── ...
 ```
 
-#### SNMP check fails
-```bash
-# Skip SNMP if snmpwalk is not available
-python3 enhanced_nmap.py targets.txt --skip-snmp
+### Report Contents
+
+#### Security Report (INFRA_SECURITY_REPORT.txt)
+- Executive summary
+- Scan configuration details
+- Findings by severity (Critical/High/Medium/Low)
+- Per-host detailed results
+- Recommendations based on findings
+
+#### JSON Report (scan_results.json)
+- Structured data for integration
+- Complete scan metadata
+- All findings in parseable format
+
+## 🏗️ Scanning Workflow
+
+### Internal Infrastructure Scanning
+```
+1. Host Discovery
+   └── Multi-method discovery (SYN, ACK, UDP pings)
+
+2. AD Service Discovery
+   └── Ports: 88,135,139,389,445,464,636,3268,3269
+
+3. SMB Enumeration (if enabled)
+   └── Scripts: smb-enum-*, smb-vuln-*, smb-os-discovery
+
+4. LDAP/Kerberos Analysis
+   └── Scripts: ldap-*, krb5-enum-users
+
+5. Additional Services
+   └── MS-RPC, NetBIOS, WinRM, MSSQL, Exchange
 ```
 
-### Debug Mode
-Add debug output by modifying the `print_status` function calls or using verbose nmap options.
+### External Infrastructure Scanning
+```
+1. Conservative Host Discovery
+   └── Top 20 ports with retries
+
+2. Service Identification
+   └── Version detection on discovered services
+
+3. Targeted Assessments (based on options)
+   ├── SSL/TLS Security
+   ├── Web Application Testing
+   ├── SMB Vulnerabilities
+   └── General Vulnerability Scanning
+
+4. Timing Controls
+   └── Delays between hosts (slow mode)
+   └── Scan delays between probes
+```
+
+## ⚡ Performance Considerations
+
+### Scan Duration Estimates
+
+| Scan Type | Timing | Single Host | /24 Network |
+|-----------|--------|-------------|-------------|
+| Top Ports | Aggressive | ~2 min | ~30 min |
+| Top Ports | Normal | ~5 min | ~1 hour |
+| Top Ports | Slow | ~15 min | ~3 hours |
+| Full Scan | Aggressive | ~20 min | ~3 hours |
+| Full Scan | Normal | ~40 min | ~6 hours |
+| Full Scan | Slow | ~2 hours | ~12+ hours |
+
+### Optimization Tips
+
+1. **Start with top ports**: Use `--top-ports` for initial assessment
+2. **Skip discovery if needed**: Use `--skip-discovery` for known live hosts
+3. **Use aggressive timing internally**: Safe for internal networks
+4. **Combine related scans**: `--ssl-scan --web-scan` for web servers
+5. **Custom ports for targeted scanning**: Use `--ports` for specific services
+
+
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome! Please follow these guidelines:
 
-### Development Guidelines
-- Follow PEP 8 Python style guidelines
-- Add docstrings to new functions
-- Test with various target formats
-- Update README for new features
+1. Test thoroughly before submitting
+2. Document new features
+3. Follow existing code style
+4. Update README for new functionality
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## ⚠️ Disclaimer
 
-This tool is intended for legitimate security testing and network administration purposes only. Users are responsible for complying with all applicable laws and regulations. The authors assume no liability for misuse of this software.
+This tool is provided for legitimate security testing and network administration purposes only. Users are solely responsible for complying with all applicable laws and regulations. The authors assume no liability for misuse or damage caused by this software.
+
+**Use responsibly and ethically.**
 
 ## 🙏 Acknowledgments
 
-- **Nmap Project** - For the powerful network scanning engine
-- **Net-SNMP Project** - For SNMP utilities
-- **Python Community** - For excellent threading and subprocess libraries
+- **Nmap Project** - For the powerful scanning engine
+- **Python Community** - For excellent standard libraries
+- **Security Community** - For continuous feedback and improvements
 
 ---
 
-**Made with ❤️ for the cybersecurity community**
+**Made with ❤️ for the security community**
+
+*For questions or support, please open an issue on the project repository.*
