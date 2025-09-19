@@ -9,13 +9,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import argparse
 import json
+import shutil
 
 # Configuration
 MAX_THREADS = 10
-TIMEOUT_PING = 60
-TIMEOUT_FAST = 300
-TIMEOUT_FULL = 1800
-TIMEOUT_UDP = 900
+TIMEOUT_STANDARD = 600  # 10 minutes for most scans
+TIMEOUT_FULL = 1800     # 30 minutes for full port scan
 
 class Colors:
     """ANSI color codes for enhanced terminal output"""
@@ -44,152 +43,213 @@ def print_banner():
     banner = f"""
 {Colors.CYAN}{Colors.BOLD}
 ╔══════════════════════════════════════════════════════════════════════╗
-║                      ENHANCED NETWORK SCANNER                       ║
-║                         Multi-Stage Analysis                        ║
+║               INFRASTRUCTURE SECURITY SCANNER v3.0                   ║
+║           Advanced Internal/External Infrastructure Analysis         ║
 ╚══════════════════════════════════════════════════════════════════════╝
 {Colors.END}"""
     print(banner)
 
 def print_status(message, status_type="info", indent=0):
-    """Print enhanced colored status messages with better formatting"""
+    """Print enhanced colored status messages"""
     indent_str = "  " * indent
     timestamp = datetime.now().strftime("%H:%M:%S")
     
     status_configs = {
-        "info": {
-            "symbol": "ℹ",
-            "color": Colors.BLUE,
-            "bg": ""
-        },
-        "success": {
-            "symbol": "✓",
-            "color": Colors.GREEN,
-            "bg": ""
-        },
-        "error": {
-            "symbol": "✗",
-            "color": Colors.RED,
-            "bg": ""
-        },
-        "warning": {
-            "symbol": "⚠",
-            "color": Colors.YELLOW,
-            "bg": ""
-        },
-        "progress": {
-            "symbol": "⚡",
-            "color": Colors.CYAN,
-            "bg": ""
-        },
-        "discovery": {
-            "symbol": "🔍",
-            "color": Colors.MAGENTA,
-            "bg": ""
-        },
-        "scan": {
-            "symbol": "🚀",
-            "color": Colors.CYAN,
-            "bg": ""
-        },
-        "complete": {
-            "symbol": "🎯",
-            "color": Colors.GREEN,
-            "bg": Colors.BG_GREEN
-        }
+        "info": {"symbol": "ℹ", "color": Colors.BLUE},
+        "success": {"symbol": "✓", "color": Colors.GREEN},
+        "error": {"symbol": "✗", "color": Colors.RED},
+        "warning": {"symbol": "⚠", "color": Colors.YELLOW},
+        "progress": {"symbol": "⚡", "color": Colors.CYAN},
+        "scan": {"symbol": "🔍", "color": Colors.MAGENTA},
+        "complete": {"symbol": "🎯", "color": Colors.GREEN},
+        "folder": {"symbol": "📁", "color": Colors.YELLOW},
+        "file": {"symbol": "📄", "color": Colors.WHITE}
     }
     
     config = status_configs.get(status_type, status_configs["info"])
     
     formatted_message = (
-        f"{indent_str}{config['color']}{config['bg']}"
+        f"{indent_str}{config['color']}"
         f"[{config['symbol']}] {Colors.WHITE}{timestamp}{Colors.END} "
         f"{config['color']}{message}{Colors.END}"
     )
     
     print(formatted_message)
 
-def print_section_header(title, stage_num=None):
+def print_section_header(title, scan_type=None):
     """Print colorful section headers"""
-    if stage_num:
-        header = f"""
-{Colors.HEADER}{Colors.BOLD}
+    color = Colors.CYAN if scan_type == "external" else Colors.MAGENTA if scan_type == "internal" else Colors.HEADER
+    header = f"""
+{color}{Colors.BOLD}
 {'='*80}
-    STAGE {stage_num}: {title}
-{'='*80}
-{Colors.END}"""
-    else:
-        header = f"""
-{Colors.CYAN}{Colors.BOLD}
-{'='*60}
     {title}
-{'='*60}
+{'='*80}
 {Colors.END}"""
     print(header)
 
-def print_progress_bar(current, total, prefix="Progress", length=50):
-    """Print colorful progress bar"""
-    percent = 100 * (current / float(total))
-    filled_length = int(length * current // total)
-    bar = '█' * filled_length + '-' * (length - filled_length)
-    
-    color = Colors.GREEN if percent == 100 else Colors.YELLOW if percent > 50 else Colors.RED
-    
-    print(f'\r{Colors.CYAN}{prefix}{Colors.END}: |{color}{bar}{Colors.END}| '
-          f'{Colors.WHITE}{percent:.1f}%{Colors.END} ({current}/{total})', end='', flush=True)
-    
-    if current == total:
-        print()  # New line when complete
-
-class NetworkScanner:
-    def __init__(self, input_file, skip_ping=False, skip_fast=False, skip_full=False, skip_udp=False, skip_snmp=False):
+class SecurityScanner:
+    def __init__(self, input_file, scan_mode="external", skip_discovery=False, timing="normal", scan_types=None, custom_ports=None):
         self.input_file = input_file
-        self.output_folder = "nmap_results"
-        self.skip_ping = skip_ping
-        self.skip_fast = skip_fast
-        self.skip_full = skip_full
-        self.skip_udp = skip_udp
-        self.skip_snmp = skip_snmp
+        self.scan_mode = scan_mode  # "internal" or "external"
+        self.skip_discovery = skip_discovery
+        self.timing = timing
+        self.scan_types = scan_types or []
+        self.custom_ports = custom_ports
         
-        # Enhanced output files
-        self.live_hosts_file = os.path.join(self.output_folder, "live_hosts.txt")
-        self.consolidated_report = os.path.join(self.output_folder, "CONSOLIDATED_SCAN_REPORT.txt")
-        self.json_report = os.path.join(self.output_folder, "scan_results.json")
-        self.detailed_log = os.path.join(self.output_folder, "detailed_scan.log")
+        # Create main output folder
+        self.output_folder = f"infra_scan_{scan_mode}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        os.makedirs(self.output_folder, exist_ok=True)
+        
+        # Create subdirectories
+        self.hosts_folder = os.path.join(self.output_folder, "hosts")
+        self.reports_folder = os.path.join(self.output_folder, "reports")
+        self.logs_folder = os.path.join(self.output_folder, "logs")
+        
+        os.makedirs(self.hosts_folder, exist_ok=True)
+        os.makedirs(self.reports_folder, exist_ok=True)
+        os.makedirs(self.logs_folder, exist_ok=True)
+        
+        # Output files
+        self.live_hosts_file = os.path.join(self.reports_folder, "live_hosts.txt")
+        self.consolidated_report = os.path.join(self.reports_folder, "SECURITY_ASSESSMENT_REPORT.txt")
+        self.executive_summary = os.path.join(self.reports_folder, "EXECUTIVE_SUMMARY.txt")
+        self.json_report = os.path.join(self.reports_folder, "scan_results.json")
+        self.detailed_log = os.path.join(self.logs_folder, "detailed_scan.log")
+        self.error_log = os.path.join(self.logs_folder, "errors.log")
         
         self.lock = threading.Lock()
         self.scan_results = {
             'scan_info': {
                 'start_time': datetime.now().isoformat(),
                 'target_file': input_file,
-                'stages': {
-                    'host_discovery': not skip_ping,
-                    'fast_scan': not skip_fast,
-                    'full_scan': not skip_full,
-                    'udp_scan': not skip_udp,
-                    'snmp_scan': not skip_snmp
-                }
+                'scan_mode': scan_mode,
+                'timing': timing,
+                'scan_types': scan_types,
+                'custom_ports': custom_ports
+            },
+            'statistics': {
+                'total_targets': 0,
+                'live_hosts': 0,
+                'total_scans': 0,
+                'successful_scans': 0,
+                'failed_scans': 0
             },
             'live_hosts': [],
-            'fast_scan_results': [],
-            'full_scan_results': [],
-            'udp_scan_results': [],
-            'snmp_scan_results': []
+            'scan_results': {}
         }
         
-        # Create output directory
-        os.makedirs(self.output_folder, exist_ok=True)
+        # Initialize log files
+        self._initialize_logs()
         
-        # Initialize log file
+        # Display folder structure
+        self._display_folder_structure()
+
+    def _initialize_logs(self):
+        """Initialize log files with headers"""
         with open(self.detailed_log, 'w') as f:
-            f.write(f"Enhanced Network Scanner - Detailed Log\n")
+            f.write(f"{'='*80}\n")
+            f.write(f"Infrastructure Security Scanner - {self.scan_mode.upper()} Scan\n")
             f.write(f"Started: {datetime.now()}\n")
+            f.write(f"Timing Profile: {self.timing}\n")
+            f.write(f"Scan Types: {', '.join(self.scan_types) if self.scan_types else 'All'}\n")
             f.write(f"{'='*80}\n\n")
+        
+        with open(self.error_log, 'w') as f:
+            f.write("Error Log\n")
+            f.write(f"Started: {datetime.now()}\n")
+            f.write("="*80 + "\n\n")
+
+    def _display_folder_structure(self):
+        """Display the created folder structure"""
+        print_status(f"Created output directory: {Colors.GREEN}{self.output_folder}{Colors.END}", "folder")
+        print_status("Directory structure:", "info", 1)
+        print_status(f"hosts/     - Individual host scan results", "folder", 2)
+        print_status(f"reports/   - Consolidated reports and summaries", "folder", 2)
+        print_status(f"logs/      - Detailed logs and error tracking", "folder", 2)
 
     def log_to_file(self, message, log_type="INFO"):
         """Log messages to detailed log file"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(self.detailed_log, 'a') as f:
-            f.write(f"[{timestamp}] [{log_type}] {message}\n")
+        with self.lock:
+            with open(self.detailed_log, 'a') as f:
+                f.write(f"[{timestamp}] [{log_type}] {message}\n")
+            
+            if log_type == "ERROR":
+                with open(self.error_log, 'a') as f:
+                    f.write(f"[{timestamp}] {message}\n")
+
+    def get_timing_flag(self):
+        """Get nmap timing flag based on timing profile"""
+        timing_flags = {
+            "slow": "-T1",
+            "normal": "-T2",
+            "aggressive": "-T4"
+        }
+        return timing_flags.get(self.timing, "-T2")
+
+    def create_host_folder(self, ip):
+        """Create a dedicated folder for each host"""
+        # Replace dots with underscores for folder name
+        folder_name = ip.replace('.', '_')
+        host_folder = os.path.join(self.hosts_folder, folder_name)
+        os.makedirs(host_folder, exist_ok=True)
+        
+        # Create a summary file for this host
+        summary_file = os.path.join(host_folder, "HOST_SUMMARY.txt")
+        with open(summary_file, 'w') as f:
+            f.write(f"{'='*60}\n")
+            f.write(f"Host: {ip}\n")
+            f.write(f"Scan Started: {datetime.now()}\n")
+            f.write(f"Scan Mode: {self.scan_mode}\n")
+            f.write(f"Timing: {self.timing}\n")
+            f.write(f"{'='*60}\n\n")
+        
+        return host_folder
+
+    def discover_live_hosts(self, target):
+        """Discover live hosts using appropriate method based on scan mode"""
+        print_status(f"Discovering live hosts in {Colors.YELLOW}{target}{Colors.END}...", "scan")
+        self.log_to_file(f"Starting host discovery for {target}")
+        
+        live_hosts = []
+        
+        try:
+            timing_flag = self.get_timing_flag()
+            
+            if self.scan_mode == "internal":
+                # For internal, use multiple discovery methods
+                cmd = ["nmap", "-sn", timing_flag, "-PS21,22,23,25,80,443,445,3389", 
+                       "-PA80,443", "-PU161", target]
+            else:
+                # For external, use -Pn with quick port check
+                cmd = ["nmap", "-Pn", "-sS", timing_flag, "--top-ports", "20", 
+                       "--max-retries", "1", target]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            for line in result.stdout.splitlines():
+                if "Nmap scan report for" in line:
+                    if "(" in line and ")" in line:
+                        ip = line.split("(")[1].split(")")[0]
+                    else:
+                        ip = line.split()[-1]
+                    
+                    # Validate IP
+                    if self.is_valid_ip(ip):
+                        live_hosts.append(ip)
+                        print_status(f"Found live host: {Colors.GREEN}{ip}{Colors.END}", "success", 1)
+            
+            self.log_to_file(f"Host discovery completed for {target}. Found {len(live_hosts)} hosts")
+            return live_hosts
+            
+        except subprocess.TimeoutExpired:
+            print_status(f"Timeout during host discovery for {target}", "error")
+            self.log_to_file(f"Host discovery timeout for {target}", "ERROR")
+            return []
+        except Exception as e:
+            print_status(f"Error in host discovery: {e}", "error")
+            self.log_to_file(f"Host discovery error: {e}", "ERROR")
+            return []
 
     def is_valid_ip(self, ip):
         """Validate IP address format"""
@@ -204,745 +264,780 @@ class NetworkScanner:
         except ValueError:
             return False
 
-    def expand_targets(self, targets):
-        """Expand CIDR ranges and individual IPs to list of IPs"""
-        all_ips = []
-        
-        print_status("Expanding target ranges...", "progress")
-        
-        for target in targets:
-            target = target.strip()
-            if not target:
-                continue
-                
-            if '/' in target:  # CIDR notation
-                try:
-                    import ipaddress
-                    network = ipaddress.IPv4Network(target, strict=False)
-                    ips = [str(ip) for ip in network.hosts()]
-                    all_ips.extend(ips)
-                    print_status(f"Expanded {target} to {len(ips)} hosts", "info", 1)
-                except Exception as e:
-                    all_ips.append(target)
-                    print_status(f"Could not expand {target}: {e}", "warning", 1)
-            elif '-' in target and target.count('.') == 3:  # Range like 192.168.1.1-10
-                try:
-                    base = '.'.join(target.split('.')[:-1])
-                    last_octet = target.split('.')[-1]
-                    if '-' in last_octet:
-                        start, end = last_octet.split('-')
-                        range_ips = []
-                        for i in range(int(start), int(end) + 1):
-                            range_ips.append(f"{base}.{i}")
-                        all_ips.extend(range_ips)
-                        print_status(f"Expanded range {target} to {len(range_ips)} hosts", "info", 1)
-                    else:
-                        all_ips.append(target)
-                except Exception as e:
-                    all_ips.append(target)
-                    print_status(f"Could not expand range {target}: {e}", "warning", 1)
-            else:
-                all_ips.append(target)
-        
-        return all_ips
-    
-    def discover_live_hosts(self, target):
-        """Discover live hosts using -Pn with port scanning"""
-        print_status(f"Discovering live hosts in {Colors.YELLOW}{target}{Colors.END}...", "discovery")
-        self.log_to_file(f"Starting host discovery for {target}")
-        
-        live_hosts = []
+    def run_nmap_command(self, ip, command_desc, nmap_args, output_suffix, host_folder):
+        """Generic function to run nmap commands and save results"""
+        print_status(f"Running {command_desc} on {Colors.CYAN}{ip}{Colors.END}...", "scan", 1)
+        self.log_to_file(f"Starting {command_desc} for {ip}")
         
         try:
-            result = subprocess.run(
-                ["nmap", "-Pn", "-sS", "--top-ports", "100", "-T4", "--max-retries", "1", "--host-timeout", "60s", target],
-                capture_output=True,
-                text=True,
-                timeout=TIMEOUT_PING
-            )
+            # Add timing flag to nmap args
+            timing_flag = self.get_timing_flag()
+            cmd = ["nmap", "-Pn", timing_flag] + nmap_args + [ip]
             
-            for line in result.stdout.splitlines():
-                if line.startswith("Nmap scan report for"):
-                    if "(" in line and ")" in line:
-                        ip = line.split("(")[1].split(")")[0]
-                    else:
-                        ip = line.split()[-1]
-                    
-                    if self.is_valid_ip(ip):
-                        live_hosts.append(ip)
-                        print_status(f"Found live host: {Colors.GREEN}{ip}{Colors.END}", "success", 1)
-            
-            self.log_to_file(f"Host discovery for {target} completed. Found {len(live_hosts)} live hosts")
-            print_status(f"Discovery complete for {target}: {Colors.GREEN}{len(live_hosts)}{Colors.END} live hosts", "complete")
-            return live_hosts
-            
-        except subprocess.TimeoutExpired:
-            error_msg = f"Host discovery timeout for {target}"
-            print_status(error_msg, "error")
-            self.log_to_file(error_msg, "ERROR")
-            return live_hosts
-        except Exception as e:
-            error_msg = f"Error in host discovery for {target}: {e}"
-            print_status(error_msg, "error")
-            self.log_to_file(error_msg, "ERROR")
-            return live_hosts
-    
-    def fast_scan_1000(self, ip):
-        """Fast scan on top 1000 ports with enhanced output"""
-        print_status(f"Fast scanning {Colors.CYAN}{ip}{Colors.END} (top 1000 ports)...", "scan")
-        self.log_to_file(f"Starting fast scan for {ip}")
-        
-        try:
-            result = subprocess.run(
-                ["nmap", "-Pn", "-sCV", "-T4", "--top-ports", "1000", ip],
-                capture_output=True,
-                text=True,
-                timeout=TIMEOUT_FAST
-            )
-            
-            # Parse results
-            open_ports = []
-            service_details = {}
-            
-            for line in result.stdout.splitlines():
-                if "/tcp" in line and "open" in line:
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        port = parts[0].split("/")[0]
-                        service = parts[2] if len(parts) > 2 else "unknown"
-                        version = " ".join(parts[3:]) if len(parts) > 3 else ""
-                        
-                        open_ports.append(port)
-                        service_details[port] = {
-                            'service': service,
-                            'version': version,
-                            'full_line': line.strip()
-                        }
-            
-            # Save individual result
-            out_file = os.path.join(self.output_folder, f"{ip.replace('.', '_')}-fast.txt")
-            with open(out_file, "w") as f:
-                f.write(f"FAST SCAN RESULTS FOR {ip}\n")
-                f.write(f"Scan completed: {datetime.now()}\n")
-                f.write("="*60 + "\n\n")
-                f.write(result.stdout)
-            
-            status_msg = f"Fast scan complete for {Colors.GREEN}{ip}{Colors.END}: {Colors.YELLOW}{len(open_ports)}{Colors.END} open ports"
-            if open_ports:
-                status_msg += f" ({', '.join(open_ports[:5])}{'...' if len(open_ports) > 5 else ''})"
-            
-            print_status(status_msg, "complete", 1)
-            self.log_to_file(f"Fast scan completed for {ip}. Found {len(open_ports)} open ports: {', '.join(open_ports)}")
-            
-            return {
-                'ip': ip,
-                'open_ports': open_ports,
-                'service_details': service_details,
-                'success': True,
-                'scan_output': result.stdout
-            }
-            
-        except subprocess.TimeoutExpired:
-            error_msg = f"Fast scan timeout for {ip}"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'open_ports': [], 'service_details': {}, 'success': False, 'error': 'timeout'}
-        except Exception as e:
-            error_msg = f"Fast scan error for {ip}: {e}"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'open_ports': [], 'service_details': {}, 'success': False, 'error': str(e)}
-    
-    def full_port_scan(self, ip):
-        """Full port scan on all 65535 ports"""
-        print_status(f"Full scanning {Colors.MAGENTA}{ip}{Colors.END} (all 65535 ports)...", "scan")
-        self.log_to_file(f"Starting full port scan for {ip}")
-        
-        try:
-            result = subprocess.run(
-                ["nmap", "-Pn", "-sCV", "-T4", "-p-", ip],
-                capture_output=True,
-                text=True,
-                timeout=TIMEOUT_FULL
-            )
-            
-            # Parse results
-            open_ports = []
-            service_details = {}
-            
-            for line in result.stdout.splitlines():
-                if "/tcp" in line and "open" in line:
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        port = parts[0].split("/")[0]
-                        service = parts[2] if len(parts) > 2 else "unknown"
-                        version = " ".join(parts[3:]) if len(parts) > 3 else ""
-                        
-                        open_ports.append(port)
-                        service_details[port] = {
-                            'service': service,
-                            'version': version,
-                            'full_line': line.strip()
-                        }
-            
-            # Save individual result
-            out_file = os.path.join(self.output_folder, f"{ip.replace('.', '_')}-full.txt")
-            with open(out_file, "w") as f:
-                f.write(f"FULL PORT SCAN RESULTS FOR {ip}\n")
-                f.write(f"Scan completed: {datetime.now()}\n")
-                f.write("="*60 + "\n\n")
-                f.write(result.stdout)
-            
-            print_status(f"Full scan complete for {Colors.GREEN}{ip}{Colors.END}: {Colors.YELLOW}{len(open_ports)}{Colors.END} open ports", "complete", 1)
-            self.log_to_file(f"Full port scan completed for {ip}. Found {len(open_ports)} open ports: {', '.join(open_ports)}")
-            
-            return {
-                'ip': ip,
-                'open_ports': open_ports,
-                'service_details': service_details,
-                'success': True,
-                'scan_output': result.stdout
-            }
-            
-        except subprocess.TimeoutExpired:
-            error_msg = f"Full scan timeout for {ip}"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'open_ports': [], 'service_details': {}, 'success': False, 'error': 'timeout'}
-        except Exception as e:
-            error_msg = f"Full scan error for {ip}: {e}"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'open_ports': [], 'service_details': {}, 'success': False, 'error': str(e)}
-    
-    def udp_scan(self, ip):
-        """UDP scan on common ports"""
-        print_status(f"UDP scanning {Colors.BLUE}{ip}{Colors.END}...", "scan")
-        self.log_to_file(f"Starting UDP scan for {ip}")
-        
-        try:
-            udp_ports = "53,67,68,69,123,135,137,138,139,161,162,445,500,514,520,631,1434,1900,4500,5353"
+            # Set timeout based on scan type
+            timeout = TIMEOUT_FULL if "full" in output_suffix else TIMEOUT_STANDARD
             
             result = subprocess.run(
-                ["nmap", "-Pn", "-sU", "-T4", f"-p{udp_ports}", ip],
+                cmd,
                 capture_output=True,
                 text=True,
-                timeout=TIMEOUT_UDP
+                timeout=timeout
             )
             
-            # Parse results
-            open_ports = []
-            service_details = {}
+            # Save output to host-specific folder
+            output_file = os.path.join(host_folder, f"{output_suffix}_scan.txt")
             
-            for line in result.stdout.splitlines():
-                if "/udp" in line and ("open" in line or "open|filtered" in line):
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        port = parts[0].split("/")[0]
-                        service = parts[2] if len(parts) > 2 else "unknown"
-                        state = parts[1] if len(parts) > 1 else "unknown"
-                        
-                        open_ports.append(port)
-                        service_details[port] = {
-                            'service': service,
-                            'state': state,
-                            'full_line': line.strip()
-                        }
-            
-            # Save individual result
-            out_file = os.path.join(self.output_folder, f"{ip.replace('.', '_')}-udp.txt")
-            with open(out_file, "w") as f:
-                f.write(f"UDP SCAN RESULTS FOR {ip}\n")
-                f.write(f"Scan completed: {datetime.now()}\n")
-                f.write("="*60 + "\n\n")
-                f.write(result.stdout)
-            
-            print_status(f"UDP scan complete for {Colors.GREEN}{ip}{Colors.END}: {Colors.YELLOW}{len(open_ports)}{Colors.END} open/filtered ports", "complete", 1)
-            self.log_to_file(f"UDP scan completed for {ip}. Found {len(open_ports)} open/filtered ports: {', '.join(open_ports)}")
-            
-            return {
-                'ip': ip,
-                'open_ports': open_ports,
-                'service_details': service_details,
-                'success': True,
-                'scan_output': result.stdout
-            }
-            
-        except subprocess.TimeoutExpired:
-            error_msg = f"UDP scan timeout for {ip}"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'open_ports': [], 'service_details': {}, 'success': False, 'error': 'timeout'}
-        except Exception as e:
-            error_msg = f"UDP scan error for {ip}: {e}"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'open_ports': [], 'service_details': {}, 'success': False, 'error': str(e)}
-    
-    def snmp_check(self, ip, community="public"):
-        """Check for SNMP misconfigurations"""
-        print_status(f"SNMP checking {Colors.YELLOW}{ip}{Colors.END}...", "scan")
-        self.log_to_file(f"Starting SNMP check for {ip}")
-        
-        try:
-            # First check if SNMP port is open
-            port_check = subprocess.run(
-                ["nmap", "-sU", "-p", "161", "-Pn", "--open", ip],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            
-            if "161/udp open" not in port_check.stdout:
-                msg = f"SNMP port not open on {ip}"
-                print_status(msg, "warning", 1)
-                self.log_to_file(msg, "WARNING")
-                return {'ip': ip, 'accessible': False, 'message': 'Port 161/udp not open', 'success': True}
-            
-            # Run snmpwalk
-            result = subprocess.run(
-                ["snmpwalk", "-v2c", "-c", community, ip, "1.3.6.1.2.1.1"],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            
-            # Save individual result
-            out_file = os.path.join(self.output_folder, f"{ip.replace('.', '_')}-snmp.txt")
-            with open(out_file, "w") as f:
-                f.write(f"SNMP CHECK RESULTS FOR {ip}\n")
-                f.write(f"Community: {community}\n")
-                f.write(f"Scan completed: {datetime.now()}\n")
-                f.write("="*60 + "\n\n")
-                f.write("Port Check Output:\n")
-                f.write(port_check.stdout)
-                f.write("\n" + "="*40 + "\n")
-                f.write("SNMP Walk Output:\n")
+            with open(output_file, 'w') as f:
+                f.write(f"{'='*80}\n")
+                f.write(f"{command_desc.upper()} RESULTS FOR {ip}\n")
+                f.write(f"Command: {' '.join(cmd)}\n")
+                f.write(f"Timestamp: {datetime.now()}\n")
+                f.write(f"{'='*80}\n\n")
                 f.write(result.stdout)
                 if result.stderr:
-                    f.write("\nErrors:\n")
+                    f.write("\n\nSTDERR:\n")
                     f.write(result.stderr)
             
-            if result.returncode == 0 and result.stdout.strip():
-                print_status(f"SNMP accessible on {Colors.RED}{ip}{Colors.END} with community '{community}'", "error", 1)
-                self.log_to_file(f"SNMP vulnerable: {ip} accessible with community '{community}'", "WARNING")
-                return {'ip': ip, 'accessible': True, 'message': f'SNMP accessible with community "{community}"', 'success': True, 'snmp_data': result.stdout}
-            else:
-                print_status(f"SNMP secured on {Colors.GREEN}{ip}{Colors.END}", "success", 1)
-                self.log_to_file(f"SNMP secure: {ip} not accessible with community '{community}'")
-                return {'ip': ip, 'accessible': False, 'message': f'SNMP not accessible with community "{community}"', 'success': True}
-                
+            # Parse for findings
+            findings = self.parse_nmap_output(result.stdout, command_desc)
+            
+            if findings:
+                print_status(f"Found {len(findings)} findings in {command_desc}", "warning", 2)
+                # Save findings to a separate file
+                findings_file = os.path.join(host_folder, f"{output_suffix}_findings.txt")
+                with open(findings_file, 'w') as f:
+                    f.write(f"FINDINGS FROM {command_desc.upper()}\n")
+                    f.write("="*60 + "\n\n")
+                    for finding in findings:
+                        f.write(f"• {finding}\n")
+            
+            self.log_to_file(f"Completed {command_desc} for {ip}")
+            self.scan_results['statistics']['successful_scans'] += 1
+            
+            return {
+                'success': True,
+                'output': result.stdout,
+                'findings': findings,
+                'output_file': output_file
+            }
+            
         except subprocess.TimeoutExpired:
-            error_msg = f"SNMP check timeout for {ip}"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'accessible': False, 'message': 'Timeout', 'success': False}
-        except FileNotFoundError:
-            error_msg = "snmpwalk not found. Install snmp-utils package"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'accessible': False, 'message': 'snmpwalk not installed', 'success': False}
+            print_status(f"Timeout during {command_desc} for {ip}", "error", 2)
+            self.log_to_file(f"Timeout in {command_desc} for {ip}", "ERROR")
+            self.scan_results['statistics']['failed_scans'] += 1
+            return {'success': False, 'error': 'timeout', 'findings': []}
         except Exception as e:
-            error_msg = f"SNMP check error for {ip}: {e}"
-            print_status(error_msg, "error", 1)
-            self.log_to_file(error_msg, "ERROR")
-            return {'ip': ip, 'accessible': False, 'message': str(e), 'success': False}
-    
-    def generate_consolidated_report(self):
-        """Generate a comprehensive consolidated report"""
-        print_status("Generating consolidated report...", "progress")
+            print_status(f"Error in {command_desc}: {e}", "error", 2)
+            self.log_to_file(f"Error in {command_desc} for {ip}: {e}", "ERROR")
+            self.scan_results['statistics']['failed_scans'] += 1
+            return {'success': False, 'error': str(e), 'findings': []}
+
+    def parse_nmap_output(self, output, scan_type):
+        """Parse nmap output for important findings"""
+        findings = []
         
+        # Look for vulnerabilities
+        vuln_keywords = ['VULNERABLE', 'vulnerable', 'LIKELY VULNERABLE', 'MS17-010', 
+                        'EternalBlue', 'Heartbleed', 'CVE-', 'WEAK', 'ANONYMOUS',
+                        'null session', 'Obsolete', 'deprecated', 'unencrypted']
+        
+        for line in output.splitlines():
+            # Check for vulnerability keywords
+            for keyword in vuln_keywords:
+                if keyword in line:
+                    findings.append(f"[VULN] {line.strip()}")
+                    break
+            
+            # Check for open ports
+            if "/tcp" in line and "open" in line:
+                findings.append(f"[OPEN TCP] {line.strip()}")
+            elif "/udp" in line and "open" in line:
+                findings.append(f"[OPEN UDP] {line.strip()}")
+            
+            # Check for service versions
+            if "Service Info:" in line:
+                findings.append(f"[SERVICE] {line.strip()}")
+            
+            # Check for OS detection
+            if "OS details:" in line or "Running:" in line:
+                findings.append(f"[OS] {line.strip()}")
+        
+        return findings
+
+    def get_scan_commands(self):
+        """Get scan commands based on scan mode and selected scan types"""
+        all_commands = {
+            'internal': {
+                'ad_services': {
+                    'name': 'AD Service Discovery',
+                    'args': ['-sV', '-sC', '-p', '88,135,139,389,445,464,636,3268,3269'],
+                    'suffix': 'ad_services'
+                },
+                'smb_scan': {
+                    'name': 'SMB Enumeration & Vulnerabilities',
+                    'args': ['--script', 'smb-enum-*,smb-vuln-*,smb-os-discovery', '-p139,445'],
+                    'suffix': 'smb'
+                },
+                'ldap_kerb': {
+                    'name': 'LDAP/Kerberos Enumeration',
+                    'args': ['-p', '88,389,636', '--script', 'ldap-*,krb5-enum-users'],
+                    'suffix': 'ldap_kerberos'
+                },
+                'msrpc': {
+                    'name': 'MS-RPC Enumeration',
+                    'args': ['-p', '135,593', '--script', 'msrpc-enum,rpc-grind'],
+                    'suffix': 'msrpc'
+                },
+                'web_services': {
+                    'name': 'Internal Web Services',
+                    'args': ['-p', '80,443,8080,8443', '--script', 'http-title,http-methods,http-enum'],
+                    'suffix': 'web'
+                }
+            },
+            'external': {
+                'top_ports': {
+                    'name': 'Top Ports Scan',
+                    'args': ['-sV', '--top-ports', '1000'],
+                    'suffix': 'top_ports'
+                },
+                'full_scan': {
+                    'name': 'Full Port Scan',
+                    'args': ['-sV', '-p-'],
+                    'suffix': 'full_ports'
+                },
+                'smb_scan': {
+                    'name': 'SMB Vulnerability Scan',
+                    'args': ['--script', 'smb-vuln*', '-p139,445'],
+                    'suffix': 'smb_vuln'
+                },
+                'ssl_scan': {
+                    'name': 'SSL/TLS Security Scan',
+                    'args': ['-p', '443,636,993,465,8443', '--script', 'ssl-*,tls-*'],
+                    'suffix': 'ssl_tls'
+                },
+                'web_scan': {
+                    'name': 'Web Application Scan',
+                    'args': ['-p', '80,443,8080,8443', '--script', 'http-*'],
+                    'suffix': 'web_app'
+                },
+                'vuln_scan': {
+                    'name': 'General Vulnerability Scan',
+                    'args': ['--script', 'vuln', '-sV'],
+                    'suffix': 'vulnerabilities'
+                }
+            }
+        }
+        
+        # If custom ports specified, create custom scan
+        if self.custom_ports:
+            return [{
+                'name': f'Custom Port Scan ({self.custom_ports})',
+                'args': ['-sV', '-sC', '-p', self.custom_ports],
+                'suffix': 'custom_ports'
+            }]
+        
+        # Get commands based on scan mode
+        mode_commands = all_commands.get(self.scan_mode, all_commands['external'])
+        
+        # If specific scan types requested, filter
+        if self.scan_types:
+            selected_commands = []
+            for scan_type in self.scan_types:
+                if scan_type in mode_commands:
+                    selected_commands.append(mode_commands[scan_type])
+            return selected_commands if selected_commands else list(mode_commands.values())
+        
+        # Return all commands for the mode
+        return list(mode_commands.values())
+
+    def scan_infrastructure(self, hosts):
+        """Run infrastructure scans based on mode"""
+        scan_type = "internal" if self.scan_mode == "internal" else "external"
+        print_section_header(f"{scan_type.upper()} INFRASTRUCTURE SCANNING", scan_type)
+        
+        scan_commands = self.get_scan_commands()
+        
+        print_status(f"Will run {len(scan_commands)} scan types per host", "info")
+        self.scan_results['statistics']['total_scans'] = len(hosts) * len(scan_commands)
+        
+        for host in hosts:
+            print_status(f"Scanning host: {Colors.YELLOW}{host}{Colors.END}", "info")
+            
+            # Create host-specific folder
+            host_folder = self.create_host_folder(host)
+            print_status(f"Host folder: {Colors.CYAN}{host_folder}{Colors.END}", "folder", 1)
+            
+            host_results = {}
+            
+            for scan in scan_commands:
+                result = self.run_nmap_command(
+                    host,
+                    scan['name'],
+                    scan['args'],
+                    scan['suffix'],
+                    host_folder
+                )
+                host_results[scan['name']] = result
+            
+            # Update host summary
+            self.update_host_summary(host, host_folder, host_results)
+            
+            self.scan_results['scan_results'][host] = host_results
+            
+            # Add delay between hosts if in slow mode
+            if self.timing == "slow" and host != hosts[-1]:
+                print_status("Waiting 30 seconds before next host (slow mode)...", "info", 1)
+                time.sleep(30)
+
+    def update_host_summary(self, host, host_folder, scan_results):
+        """Update the host summary file with scan results"""
+        summary_file = os.path.join(host_folder, "HOST_SUMMARY.txt")
+        
+        with open(summary_file, 'a') as f:
+            f.write("\nSCAN RESULTS SUMMARY\n")
+            f.write("="*60 + "\n\n")
+            
+            total_findings = 0
+            critical_findings = []
+            open_ports = []
+            
+            for scan_name, result in scan_results.items():
+                f.write(f"\n[{scan_name}]\n")
+                f.write("-"*40 + "\n")
+                
+                if result['success']:
+                    f.write(f"Status: SUCCESS\n")
+                    f.write(f"Findings: {len(result['findings'])}\n")
+                    
+                    if result['findings']:
+                        f.write("\nKey Findings:\n")
+                        for finding in result['findings'][:5]:  # First 5 findings
+                            f.write(f"  • {finding}\n")
+                        if len(result['findings']) > 5:
+                            f.write(f"  ... and {len(result['findings']) - 5} more\n")
+                    
+                    total_findings += len(result['findings'])
+                    
+                    # Categorize findings
+                    for finding in result['findings']:
+                        if '[VULN]' in finding or 'CVE' in finding:
+                            critical_findings.append(finding)
+                        if '[OPEN TCP]' in finding or '[OPEN UDP]' in finding:
+                            open_ports.append(finding)
+                else:
+                    f.write(f"Status: FAILED\n")
+                    f.write(f"Error: {result.get('error', 'Unknown')}\n")
+            
+            # Write summary statistics
+            f.write("\n" + "="*60 + "\n")
+            f.write("STATISTICS\n")
+            f.write("="*60 + "\n")
+            f.write(f"Total Findings: {total_findings}\n")
+            f.write(f"Critical Issues: {len(critical_findings)}\n")
+            f.write(f"Open Ports Found: {len(open_ports)}\n")
+            f.write(f"Scan Completed: {datetime.now()}\n")
+
+    def generate_security_report(self):
+        """Generate comprehensive security reports"""
+        print_status("Generating security reports...", "progress")
+        
+        # Generate main security report
+        self.generate_detailed_report()
+        
+        # Generate executive summary
+        self.generate_executive_summary()
+        
+        # Save JSON report
+        self.save_json_report()
+        
+        print_status(f"Security report saved: {Colors.GREEN}{self.consolidated_report}{Colors.END}", "complete")
+        print_status(f"Executive summary saved: {Colors.GREEN}{self.executive_summary}{Colors.END}", "complete")
+        print_status(f"JSON report saved: {Colors.GREEN}{self.json_report}{Colors.END}", "complete")
+
+    def generate_detailed_report(self):
+        """Generate detailed security assessment report"""
         report_content = []
         
         # Header
         report_content.append("═" * 100)
-        report_content.append("                           CONSOLIDATED NETWORK SCAN REPORT")
+        report_content.append(f"           INFRASTRUCTURE SECURITY ASSESSMENT REPORT")
+        report_content.append(f"                    {self.scan_mode.upper()} INFRASTRUCTURE")
         report_content.append("═" * 100)
-        report_content.append(f"Scan Started: {self.scan_results['scan_info']['start_time']}")
-        report_content.append(f"Scan Completed: {datetime.now().isoformat()}")
-        report_content.append(f"Target File: {self.scan_results['scan_info']['target_file']}")
-        report_content.append(f"Total Live Hosts: {len(self.scan_results['live_hosts'])}")
-        report_content.append("")
+        report_content.append(f"\nScan Information:")
+        report_content.append(f"  • Started: {self.scan_results['scan_info']['start_time']}")
+        report_content.append(f"  • Completed: {datetime.now().isoformat()}")
+        report_content.append(f"  • Target File: {self.scan_results['scan_info']['target_file']}")
+        report_content.append(f"  • Scan Mode: {self.scan_mode}")
+        report_content.append(f"  • Timing Profile: {self.timing}")
+        report_content.append(f"  • Total Hosts Scanned: {len(self.scan_results['live_hosts'])}")
+        report_content.append(f"  • Total Scans Run: {self.scan_results['statistics']['total_scans']}")
+        report_content.append(f"  • Successful Scans: {self.scan_results['statistics']['successful_scans']}")
+        report_content.append(f"  • Failed Scans: {self.scan_results['statistics']['failed_scans']}")
         
-        # Scan Configuration
-        report_content.append("SCAN CONFIGURATION:")
-        report_content.append("-" * 50)
-        stages = self.scan_results['scan_info']['stages']
-        for stage, enabled in stages.items():
-            status = "✓ ENABLED" if enabled else "✗ SKIPPED"
-            report_content.append(f"  {stage.replace('_', ' ').title():.<30} {status}")
-        report_content.append("")
+        # Categorize findings
+        critical_findings = []
+        high_findings = []
+        medium_findings = []
+        low_findings = []
         
-        # Live Hosts Summary
-        if self.scan_results['live_hosts']:
-            report_content.append("LIVE HOSTS:")
-            report_content.append("-" * 50)
-            for i, host in enumerate(self.scan_results['live_hosts'], 1):
-                report_content.append(f"  {i:3d}. {host}")
-            report_content.append("")
+        # Detailed host results
+        report_content.append("\n" + "═" * 100)
+        report_content.append("DETAILED HOST RESULTS")
+        report_content.append("═" * 100)
         
-        # Fast Scan Results
-        if self.scan_results['fast_scan_results']:
-            report_content.append("FAST SCAN RESULTS (TOP 1000 PORTS):")
-            report_content.append("═" * 80)
-            for result in self.scan_results['fast_scan_results']:
-                ip = result['ip']
-                if result['success']:
-                    report_content.append(f"\n🖥️  {ip}")
-                    report_content.append("   " + "─" * 50)
-                    if result['open_ports']:
-                        for port in result['open_ports']:
-                            service_info = result['service_details'].get(port, {})
-                            service_name = service_info.get('service', 'unknown')
-                            version = service_info.get('version', '')
-                            report_content.append(f"   ➤ Port {port:>5}/tcp │ {service_name:<15} │ {version}")
-                    else:
-                        report_content.append("   ➤ No open ports found")
-                else:
-                    error = result.get('error', 'unknown error')
-                    report_content.append(f"\n❌ {ip} - FAILED ({error})")
-            report_content.append("")
-        
-        # Full Scan Results
-        if self.scan_results['full_scan_results']:
-            report_content.append("FULL PORT SCAN RESULTS (ALL 65535 PORTS):")
-            report_content.append("═" * 80)
-            for result in self.scan_results['full_scan_results']:
-                ip = result['ip']
-                if result['success']:
-                    report_content.append(f"\n🔍 {ip}")
-                    report_content.append("   " + "─" * 50)
-                    if result['open_ports']:
-                        for port in result['open_ports']:
-                            service_info = result['service_details'].get(port, {})
-                            service_name = service_info.get('service', 'unknown')
-                            version = service_info.get('version', '')
-                            report_content.append(f"   ➤ Port {port:>5}/tcp │ {service_name:<15} │ {version}")
-                    else:
-                        report_content.append("   ➤ No open ports found")
-                else:
-                    error = result.get('error', 'unknown error')
-                    report_content.append(f"\n❌ {ip} - FAILED ({error})")
-            report_content.append("")
-        
-        # UDP Scan Results
-        if self.scan_results['udp_scan_results']:
-            report_content.append("UDP SCAN RESULTS:")
-            report_content.append("═" * 80)
-            for result in self.scan_results['udp_scan_results']:
-                ip = result['ip']
-                if result['success']:
-                    report_content.append(f"\n📡 {ip}")
-                    report_content.append("   " + "─" * 50)
-                    if result['open_ports']:
-                        for port in result['open_ports']:
-                            service_info = result['service_details'].get(port, {})
-                            service_name = service_info.get('service', 'unknown')
-                            state = service_info.get('state', 'unknown')
-                            report_content.append(f"   ➤ Port {port:>5}/udp │ {service_name:<15} │ {state}")
-                    else:
-                        report_content.append("   ➤ No open/filtered UDP ports found")
-                else:
-                    error = result.get('error', 'unknown error')
-                    report_content.append(f"\n❌ {ip} - FAILED ({error})")
-            report_content.append("")
-        
-        # SNMP Scan Results
-        if self.scan_results['snmp_scan_results']:
-            report_content.append("SNMP CONFIGURATION CHECK:")
-            report_content.append("═" * 80)
-            vulnerable_hosts = []
-            secure_hosts = []
+        for host, scans in self.scan_results['scan_results'].items():
+            report_content.append(f"\n{'='*80}")
+            report_content.append(f"HOST: {host}")
+            report_content.append(f"{'='*80}")
             
-            for result in self.scan_results['snmp_scan_results']:
-                ip = result['ip']
-                if result['success']:
-                    if result['accessible']:
-                        vulnerable_hosts.append(f"   ⚠️  {ip} - {result['message']}")
+            host_folder = os.path.join(self.hosts_folder, host.replace('.', '_'))
+            report_content.append(f"Results Location: {host_folder}")
+            
+            for scan_name, scan_result in scans.items():
+                report_content.append(f"\n[{scan_name}]")
+                report_content.append("-" * 40)
+                
+                if scan_result['success']:
+                    if scan_result['findings']:
+                        report_content.append(f"Status: ⚠ Issues Found ({len(scan_result['findings'])} findings)")
+                        
+                        # Show first 10 findings
+                        for finding in scan_result['findings'][:10]:
+                            report_content.append(f"  • {finding}")
+                            
+                            # Categorize findings
+                            if any(word in finding.upper() for word in ['VULNERABLE', 'CVE', 'MS17-010', 'ETERNALBLUE']):
+                                critical_findings.append(f"{host}: {finding}")
+                            elif any(word in finding.upper() for word in ['WEAK', 'ANONYMOUS', 'NULL']):
+                                high_findings.append(f"{host}: {finding}")
+                            elif '[OPEN TCP]' in finding or '[OPEN UDP]' in finding:
+                                medium_findings.append(f"{host}: {finding}")
+                            else:
+                                low_findings.append(f"{host}: {finding}")
+                        
+                        if len(scan_result['findings']) > 10:
+                            report_content.append(f"  ... and {len(scan_result['findings']) - 10} more findings")
+                            report_content.append(f"  See full results in: {scan_result.get('output_file', 'N/A')}")
                     else:
-                        secure_hosts.append(f"   ✅ {ip} - {result['message']}")
+                        report_content.append("Status: ✓ No significant findings")
                 else:
-                    secure_hosts.append(f"   ❌ {ip} - FAILED ({result['message']})")
-            
-            if vulnerable_hosts:
-                report_content.append("\n🚨 VULNERABLE HOSTS:")
-                report_content.extend(vulnerable_hosts)
-            
-            if secure_hosts:
-                report_content.append("\n🔒 SECURE/INACCESSIBLE HOSTS:")
-                report_content.extend(secure_hosts)
-            report_content.append("")
+                    report_content.append(f"Status: ✗ Scan Failed")
+                    report_content.append(f"  Error: {scan_result.get('error', 'Unknown error')}")
         
-        # Statistics Summary
-        report_content.append("SCAN STATISTICS:")
-        report_content.append("═" * 80)
+        # Risk Summary
+        report_content.append("\n" + "═" * 100)
+        report_content.append("RISK SUMMARY")
+        report_content.append("═" * 100)
         
-        # Count successful scans
-        fast_success = sum(1 for r in self.scan_results['fast_scan_results'] if r['success'])
-        fast_total = len(self.scan_results['fast_scan_results'])
-        full_success = sum(1 for r in self.scan_results['full_scan_results'] if r['success'])
-        full_total = len(self.scan_results['full_scan_results'])
-        udp_success = sum(1 for r in self.scan_results['udp_scan_results'] if r['success'])
-        udp_total = len(self.scan_results['udp_scan_results'])
-        snmp_success = sum(1 for r in self.scan_results['snmp_scan_results'] if r['success'])
-        snmp_total = len(self.scan_results['snmp_scan_results'])
+        if critical_findings:
+            report_content.append(f"\n🔴 CRITICAL RISK ({len(critical_findings)} findings)")
+            report_content.append("These require immediate attention:")
+            for finding in critical_findings[:10]:
+                report_content.append(f"  • {finding}")
         
-        report_content.append(f"Live Hosts Discovered: {len(self.scan_results['live_hosts'])}")
-        if fast_total > 0:
-            report_content.append(f"Fast Scans: {fast_success}/{fast_total} successful")
-        if full_total > 0:
-            report_content.append(f"Full Scans: {full_success}/{full_total} successful")
-        if udp_total > 0:
-            report_content.append(f"UDP Scans: {udp_success}/{udp_total} successful")
-        if snmp_total > 0:
-            report_content.append(f"SNMP Checks: {snmp_success}/{snmp_total} successful")
+        if high_findings:
+            report_content.append(f"\n🟠 HIGH RISK ({len(high_findings)} findings)")
+            report_content.append("These should be addressed urgently:")
+            for finding in high_findings[:10]:
+                report_content.append(f"  • {finding}")
         
-        # Write consolidated report
+        if medium_findings:
+            report_content.append(f"\n🟡 MEDIUM RISK ({len(medium_findings)} findings)")
+            report_content.append("These should be reviewed and remediated:")
+            for finding in medium_findings[:10]:
+                report_content.append(f"  • {finding}")
+        
+        # Recommendations
+        report_content.append("\n" + "═" * 100)
+        report_content.append("RECOMMENDATIONS")
+        report_content.append("═" * 100)
+        
+        if self.scan_mode == "internal":
+            report_content.append("\nActive Directory & Internal Infrastructure:")
+            report_content.append("  1. Review and harden Active Directory configurations")
+            report_content.append("  2. Implement network segmentation between critical services")
+            report_content.append("  3. Disable unnecessary services and ports")
+            report_content.append("  4. Enable SMB signing and disable SMBv1")
+            report_content.append("  5. Implement LDAPS (LDAP over SSL) for secure directory services")
+            report_content.append("  6. Review and restrict NTLM authentication")
+            report_content.append("  7. Implement PowerShell logging and monitoring")
+            report_content.append("  8. Regular security updates and patch management")
+        else:
+            report_content.append("\nExternal Infrastructure:")
+            report_content.append("  1. Minimize external attack surface by closing unnecessary ports")
+            report_content.append("  2. Implement Web Application Firewall (WAF) for web services")
+            report_content.append("  3. Ensure all SSL/TLS configurations use strong ciphers (TLS 1.2+)")
+            report_content.append("  4. Implement rate limiting and DDoS protection")
+            report_content.append("  5. Use VPN or bastion hosts for administrative access")
+            report_content.append("  6. Regular vulnerability assessments and penetration testing")
+            report_content.append("  7. Implement intrusion detection/prevention systems (IDS/IPS)")
+            report_content.append("  8. Enable comprehensive logging and monitoring")
+        
+        # Write report to file
         with open(self.consolidated_report, 'w') as f:
             f.write('\n'.join(report_content))
-        
-        # Write JSON report
-        self.scan_results['scan_info']['end_time'] = datetime.now().isoformat()
-        with open(self.json_report, 'w') as f:
-            json.dump(self.scan_results, f, indent=2)
-        
-        print_status(f"Consolidated report saved: {Colors.GREEN}{self.consolidated_report}{Colors.END}", "complete")
-        print_status(f"JSON report saved: {Colors.GREEN}{self.json_report}{Colors.END}", "complete")
-        print_status(f"Detailed log saved: {Colors.GREEN}{self.detailed_log}{Colors.END}", "complete")
     
-    def run_comprehensive_scan(self):
-        """Run the complete scanning workflow"""
-        print_banner()
-        print_status("Starting comprehensive network scan...", "info")
-        self.log_to_file("Starting comprehensive network scan")
+    def generate_executive_summary(self):
+        """Generate executive summary for management"""
+        summary_content = []
         
+        # Calculate statistics
+        total_findings = sum(
+            len(scan['findings']) 
+            for host_scans in self.scan_results['scan_results'].values() 
+            for scan in host_scans.values() 
+            if scan['success']
+        )
+        
+        critical_count = sum(
+            1 for host_scans in self.scan_results['scan_results'].values()
+            for scan in host_scans.values()
+            if scan['success']
+            for finding in scan['findings']
+            if any(word in finding.upper() for word in ['VULNERABLE', 'CVE', 'MS17-010'])
+        )
+        
+        # Header
+        summary_content.append("═" * 80)
+        summary_content.append("              EXECUTIVE SUMMARY")
+        summary_content.append("         Infrastructure Security Assessment")
+        summary_content.append("═" * 80)
+        summary_content.append(f"\nAssessment Date: {datetime.now().strftime('%B %d, %Y')}")
+        summary_content.append(f"Infrastructure Type: {self.scan_mode.capitalize()}")
+        summary_content.append(f"Assessment Duration: {self._calculate_duration()}")
+        
+        # Key Metrics
+        summary_content.append("\n" + "─" * 80)
+        summary_content.append("KEY METRICS")
+        summary_content.append("─" * 80)
+        summary_content.append(f"  • Hosts Assessed: {len(self.scan_results['live_hosts'])}")
+        summary_content.append(f"  • Total Security Scans: {self.scan_results['statistics']['total_scans']}")
+        summary_content.append(f"  • Success Rate: {self._calculate_success_rate():.1f}%")
+        summary_content.append(f"  • Total Findings: {total_findings}")
+        summary_content.append(f"  • Critical Issues: {critical_count}")
+        
+        # Risk Assessment
+        summary_content.append("\n" + "─" * 80)
+        summary_content.append("OVERALL RISK ASSESSMENT")
+        summary_content.append("─" * 80)
+        
+        if critical_count > 5:
+            risk_level = "CRITICAL"
+            risk_color = "🔴"
+        elif critical_count > 0:
+            risk_level = "HIGH"
+            risk_color = "🟠"
+        elif total_findings > 20:
+            risk_level = "MEDIUM"
+            risk_color = "🟡"
+        else:
+            risk_level = "LOW"
+            risk_color = "🟢"
+        
+        summary_content.append(f"\n  {risk_color} Overall Risk Level: {risk_level}")
+        
+        # Key Findings Summary
+        summary_content.append("\n" + "─" * 80)
+        summary_content.append("KEY FINDINGS")
+        summary_content.append("─" * 80)
+        
+        if critical_count > 0:
+            summary_content.append(f"\n  • {critical_count} critical vulnerabilities identified")
+            summary_content.append("    - Immediate remediation required")
+            summary_content.append("    - May include known exploitable vulnerabilities")
+        
+        open_ports_count = sum(
+            1 for host_scans in self.scan_results['scan_results'].values()
+            for scan in host_scans.values()
+            if scan['success']
+            for finding in scan['findings']
+            if '[OPEN' in finding
+        )
+        
+        if open_ports_count > 0:
+            summary_content.append(f"\n  • {open_ports_count} open ports discovered")
+            summary_content.append("    - Review for business necessity")
+            summary_content.append("    - Consider implementing access controls")
+        
+        # Immediate Actions Required
+        summary_content.append("\n" + "─" * 80)
+        summary_content.append("IMMEDIATE ACTIONS REQUIRED")
+        summary_content.append("─" * 80)
+        
+        if critical_count > 0:
+            summary_content.append("\n  1. Address critical vulnerabilities immediately")
+            summary_content.append("  2. Implement emergency patching procedures")
+            summary_content.append("  3. Review and restrict network access to vulnerable systems")
+        else:
+            summary_content.append("\n  1. Review and validate all findings")
+            summary_content.append("  2. Prioritize remediation based on risk")
+            summary_content.append("  3. Schedule regular security assessments")
+        
+        # Next Steps
+        summary_content.append("\n" + "─" * 80)
+        summary_content.append("RECOMMENDED NEXT STEPS")
+        summary_content.append("─" * 80)
+        summary_content.append("\n  1. Review detailed technical report with IT team")
+        summary_content.append("  2. Create remediation plan with timeline")
+        summary_content.append("  3. Allocate resources for security improvements")
+        summary_content.append("  4. Schedule follow-up assessment after remediation")
+        summary_content.append("  5. Consider security awareness training for staff")
+        
+        # Footer
+        summary_content.append("\n" + "═" * 80)
+        summary_content.append("For detailed technical findings, see SECURITY_ASSESSMENT_REPORT.txt")
+        summary_content.append("For raw scan data, see individual host folders in hosts/")
+        summary_content.append("═" * 80)
+        
+        # Write summary to file
+        with open(self.executive_summary, 'w') as f:
+            f.write('\n'.join(summary_content))
+    
+    def save_json_report(self):
+        """Save scan results in JSON format"""
+        self.scan_results['scan_info']['end_time'] = datetime.now().isoformat()
+        self.scan_results['scan_info']['duration'] = self._calculate_duration()
+        
+        # Add summary statistics
+        self.scan_results['summary'] = {
+            'total_findings': sum(
+                len(scan['findings']) 
+                for host_scans in self.scan_results['scan_results'].values() 
+                for scan in host_scans.values() 
+                if scan['success']
+            ),
+            'hosts_with_issues': sum(
+                1 for host_scans in self.scan_results['scan_results'].values()
+                if any(scan['success'] and scan['findings'] for scan in host_scans.values())
+            ),
+            'success_rate': self._calculate_success_rate()
+        }
+        
+        with open(self.json_report, 'w') as f:
+            json.dump(self.scan_results, f, indent=2, default=str)
+    
+    def _calculate_duration(self):
+        """Calculate scan duration"""
+        start_time = datetime.fromisoformat(self.scan_results['scan_info']['start_time'])
+        duration = datetime.now() - start_time
+        hours, remainder = divmod(duration.seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        
+        if hours > 0:
+            return f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            return f"{minutes}m {seconds}s"
+        else:
+            return f"{seconds}s"
+    
+    def _calculate_success_rate(self):
+        """Calculate scan success rate"""
+        total = self.scan_results['statistics']['total_scans']
+        successful = self.scan_results['statistics']['successful_scans']
+        
+        if total == 0:
+            return 0.0
+        return (successful / total) * 100
+    
+    def run(self):
+        """Main execution flow"""
+        print_banner()
+        
+        # Display scan configuration
+        print_status(f"Scan mode: {Colors.YELLOW}{self.scan_mode.upper()}{Colors.END} Infrastructure", "info")
+        print_status(f"Timing profile: {Colors.YELLOW}{self.timing}{Colors.END}", "info")
+        if self.scan_types:
+            print_status(f"Scan types: {Colors.YELLOW}{', '.join(self.scan_types)}{Colors.END}", "info")
+        if self.custom_ports:
+            print_status(f"Custom ports: {Colors.YELLOW}{self.custom_ports}{Colors.END}", "info")
+        
+        # Load targets
         try:
-            with open(self.input_file, "r") as f:
-                targets = [line.strip() for line in f if line.strip()]
+            with open(self.input_file, 'r') as f:
+                targets = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            self.scan_results['statistics']['total_targets'] = len(targets)
         except FileNotFoundError:
             print_status(f"Input file not found: {self.input_file}", "error")
             return
         
+        print_status(f"Loaded {len(targets)} targets from {self.input_file}", "info")
+        
+        # Host discovery
         all_live_hosts = []
         
-        if self.skip_ping:
-            print_section_header("SKIPPING HOST DISCOVERY (ASSUMING ALL TARGETS ARE LIVE)")
-            all_live_hosts = self.expand_targets(targets)
-            print_status(f"Treating {Colors.YELLOW}{len(all_live_hosts)}{Colors.END} targets as live hosts", "info")
+        if self.skip_discovery:
+            print_section_header("SKIPPING HOST DISCOVERY")
+            all_live_hosts = targets
+            print_status(f"Treating all {len(targets)} targets as live hosts", "info")
         else:
-            print_section_header("HOST DISCOVERY (using -Pn)", 1)
-            
-            completed = 0
+            print_section_header("HOST DISCOVERY PHASE")
             for target in targets:
                 live_hosts = self.discover_live_hosts(target)
                 all_live_hosts.extend(live_hosts)
-                completed += 1
-                print_progress_bar(completed, len(targets), "Discovery Progress")
         
-        # Remove duplicates and save
+        # Remove duplicates
         all_live_hosts = list(set(all_live_hosts))
         self.scan_results['live_hosts'] = all_live_hosts
+        self.scan_results['statistics']['live_hosts'] = len(all_live_hosts)
         
-        with open(self.live_hosts_file, "w") as f:
-            for ip in all_live_hosts:
-                f.write(ip + "\n")
+        # Save live hosts
+        with open(self.live_hosts_file, 'w') as f:
+            for host in all_live_hosts:
+                f.write(f"{host}\n")
         
         if not all_live_hosts:
-            print_status("No live hosts found. Try using --skip-ping if you know hosts are live.", "error")
+            print_status("No live hosts found. Exiting.", "error")
             return
         
-        print_status(f"Total live hosts discovered: {Colors.GREEN}{len(all_live_hosts)}{Colors.END}", "complete")
-
-        # Fast Scan Stage
-        if not self.skip_fast:
-            print_section_header("FAST SCAN (TOP 1000 PORTS)", 2)
-            
-            with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-                future_to_ip = {executor.submit(self.fast_scan_1000, ip): ip for ip in all_live_hosts}
-                completed = 0
-                
-                for future in as_completed(future_to_ip):
-                    result = future.result()
-                    self.scan_results['fast_scan_results'].append(result)
-                    completed += 1
-                    print_progress_bar(completed, len(all_live_hosts), "Fast Scan Progress")
-        else:
-            print_section_header("SKIPPING FAST SCAN")
-
-        # Full Port Scan Stage
-        if not self.skip_full:
-            print_section_header("FULL PORT SCAN (ALL 65535 PORTS)", 3)
-            
-            with ThreadPoolExecutor(max_workers=min(5, MAX_THREADS)) as executor:
-                future_to_ip = {executor.submit(self.full_port_scan, ip): ip for ip in all_live_hosts}
-                completed = 0
-                
-                for future in as_completed(future_to_ip):
-                    result = future.result()
-                    self.scan_results['full_scan_results'].append(result)
-                    completed += 1
-                    print_progress_bar(completed, len(all_live_hosts), "Full Scan Progress")
-        else:
-            print_section_header("SKIPPING FULL PORT SCAN")
-
-        # UDP Scan Stage
-        if not self.skip_udp:
-            print_section_header("UDP SCAN", 4)
-            
-            with ThreadPoolExecutor(max_workers=min(3, MAX_THREADS)) as executor:
-                future_to_ip = {executor.submit(self.udp_scan, ip): ip for ip in all_live_hosts}
-                completed = 0
-                
-                for future in as_completed(future_to_ip):
-                    result = future.result()
-                    self.scan_results['udp_scan_results'].append(result)
-                    completed += 1
-                    print_progress_bar(completed, len(all_live_hosts), "UDP Scan Progress")
-        else:
-            print_section_header("SKIPPING UDP SCAN")
-
-        # SNMP Check Stage
-        if not self.skip_snmp:
-            print_section_header("SNMP CONFIGURATION CHECK", 5)
-            
-            # Determine SNMP candidates
-            snmp_candidates = []
-            if self.scan_results['udp_scan_results']:
-                for result in self.scan_results['udp_scan_results']:
-                    if any("161" in port for port in result['open_ports']):
-                        snmp_candidates.append(result['ip'])
-            else:
-                snmp_candidates = all_live_hosts
-            
-            if snmp_candidates:
-                print_status(f"Checking SNMP on {Colors.YELLOW}{len(snmp_candidates)}{Colors.END} candidates", "info")
-                
-                with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-                    future_to_ip = {executor.submit(self.snmp_check, ip): ip for ip in snmp_candidates}
-                    completed = 0
-                    
-                    for future in as_completed(future_to_ip):
-                        result = future.result()
-                        self.scan_results['snmp_scan_results'].append(result)
-                        completed += 1
-                        print_progress_bar(completed, len(snmp_candidates), "SNMP Check Progress")
-            else:
-                print_status("No SNMP candidates found (no UDP port 161 open)", "warning")
-        else:
-            print_section_header("SKIPPING SNMP CHECK")
+        print_status(f"Total live hosts to scan: {Colors.GREEN}{len(all_live_hosts)}{Colors.END}", "info")
         
-        # Generate comprehensive reports
+        # Run infrastructure scans
+        self.scan_infrastructure(all_live_hosts)
+        
+        # Generate reports
         print_section_header("GENERATING REPORTS")
-        self.generate_consolidated_report()
+        self.generate_security_report()
         
-        print_banner()
-        print_status(f"🎉 Comprehensive scan completed successfully! 🎉", "complete")
-        print_status(f"📁 All results saved in: {Colors.CYAN}{self.output_folder}{Colors.END}", "info")
-        print_status(f"📄 Main report: {Colors.GREEN}{self.consolidated_report}{Colors.END}", "info")
-        print_status(f"📊 JSON data: {Colors.GREEN}{self.json_report}{Colors.END}", "info")
-        print_status(f"📝 Detailed log: {Colors.GREEN}{self.detailed_log}{Colors.END}", "info")
+        # Summary
+        print("")
+        print_section_header("SCAN COMPLETE")
+        print_status(f"Output directory: {Colors.CYAN}{self.output_folder}{Colors.END}", "folder")
+        print("")
+        print_status("Generated Files:", "info")
+        print_status(f"Executive Summary: {Colors.GREEN}{self.executive_summary}{Colors.END}", "file", 1)
+        print_status(f"Detailed Report: {Colors.GREEN}{self.consolidated_report}{Colors.END}", "file", 1)
+        print_status(f"JSON Data: {Colors.GREEN}{self.json_report}{Colors.END}", "file", 1)
+        print_status(f"Scan Logs: {Colors.GREEN}{self.detailed_log}{Colors.END}", "file", 1)
+        print("")
+        print_status(f"Individual host results in: {Colors.CYAN}{self.hosts_folder}{Colors.END}", "folder")
+        print_status(f"Success rate: {Colors.GREEN}{self._calculate_success_rate():.1f}%{Colors.END}", "success")
+        print_status(f"Duration: {Colors.YELLOW}{self._calculate_duration()}{Colors.END}", "info")
 
 def main():
     parser = argparse.ArgumentParser(
-        description=f"{Colors.CYAN}Enhanced Multi-Stage Network Scanner{Colors.END}",
+        description='Infrastructure Security Scanner v3.0 - Advanced Network Assessment Tool',
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-{Colors.YELLOW}Examples:{Colors.END}
-  python3 enhanced_nmap.py targets.txt                    # Run all stages
-  python3 enhanced_nmap.py targets.txt --skip-ping       # Skip host discovery
-  python3 enhanced_nmap.py targets.txt --skip-full       # Skip full port scan
-  python3 enhanced_nmap.py targets.txt --skip-udp --skip-snmp  # TCP only
-  python3 enhanced_nmap.py targets.txt --fast-only       # Only fast scan
-  python3 enhanced_nmap.py targets.txt --udp-only        # Only UDP scan
+        epilog="""
+Examples:
+  python3 infra_scanner.py targets.txt                      # Interactive mode
+  python3 infra_scanner.py targets.txt --internal           # Internal/AD scan
+  python3 infra_scanner.py targets.txt --external --slow    # Stealthy external scan
+  python3 infra_scanner.py targets.txt --top-ports --aggressive  # Fast top ports scan
+  python3 infra_scanner.py targets.txt --ports "22,80,443"  # Custom ports
+  python3 infra_scanner.py targets.txt --smb-scan --vuln-scan  # SMB + vulnerability scan
 
-{Colors.GREEN}Output Files:{Colors.END}
-  • CONSOLIDATED_SCAN_REPORT.txt - Main human-readable report
-  • scan_results.json - Machine-readable JSON data
-  • detailed_scan.log - Detailed execution log
-  • Individual scan files for each host
+Output Structure:
+  infra_scan_[mode]_[timestamp]/
+    ├── hosts/          # Individual host folders with scan results
+    ├── reports/        # Consolidated reports and summaries
+    └── logs/           # Detailed scan and error logs
         """
     )
     
-    parser.add_argument('targets_file', help='File containing target IPs/ranges')
+    parser.add_argument('targets_file', help='File containing target IPs/ranges (one per line)')
     
-    # Skip options
-    parser.add_argument('--skip-ping', action='store_true', 
-                       help='Skip host discovery (assume all targets are live)')
-    parser.add_argument('--skip-fast', action='store_true',
-                       help='Skip fast scan (top 1000 ports)')
-    parser.add_argument('--skip-full', action='store_true',
-                       help='Skip full port scan (all 65535 ports)')
-    parser.add_argument('--skip-udp', action='store_true',
-                       help='Skip UDP scan')
-    parser.add_argument('--skip-snmp', action='store_true',
-                       help='Skip SNMP configuration check')
+    # Scan modes
+    mode_group = parser.add_argument_group('Scan Modes')
+    mode_group.add_argument('--internal', action='store_true', help='Internal/AD infrastructure scan')
+    mode_group.add_argument('--external', action='store_true', help='External infrastructure scan')
     
-    # Convenience options
-    parser.add_argument('--fast-only', action='store_true',
-                       help='Only run host discovery and fast scan')
-    parser.add_argument('--tcp-only', action='store_true',
-                       help='Only run TCP scans (skip UDP and SNMP)')
-    parser.add_argument('--udp-only', action='store_true',
-                       help='Only run host discovery and UDP/SNMP scans')
+    # Timing profiles
+    timing_group = parser.add_argument_group('Timing Profiles')
+    timing_group.add_argument('--slow', action='store_true', help='Slow/stealthy scanning (T1)')
+    timing_group.add_argument('--normal', action='store_true', help='Normal speed (T2, default)')
+    timing_group.add_argument('--aggressive', action='store_true', help='Fast aggressive scanning (T4)')
+    
+    # Scan types
+    scan_group = parser.add_argument_group('Scan Types')
+    scan_group.add_argument('--top-ports', action='store_true', help='Scan top 1000 ports')
+    scan_group.add_argument('--full-scan', action='store_true', help='Full port scan (all 65535)')
+    scan_group.add_argument('--smb-scan', action='store_true', help='SMB/NetBIOS enumeration')
+    scan_group.add_argument('--ssl-scan', action='store_true', help='SSL/TLS security assessment')
+    scan_group.add_argument('--web-scan', action='store_true', help='Web application scanning')
+    scan_group.add_argument('--vuln-scan', action='store_true', help='Vulnerability scanning')
+    scan_group.add_argument('--ports', metavar='PORTS', help='Custom ports (e.g., "22,80,443")')
+    
+    # Additional options
+    parser.add_argument('--skip-discovery', action='store_true', help='Skip host discovery phase')
     
     args = parser.parse_args()
     
+    # Determine scan mode
+    if args.internal and args.external:
+        print_status("Error: Cannot specify both --internal and --external", "error")
+        sys.exit(1)
+    elif args.internal:
+        scan_mode = "internal"
+    elif args.external:
+        scan_mode = "external"
+    else:
+        # Interactive mode
+        print_banner()
+        print_status("Please select scan type:", "info")
+        print(f"  {Colors.CYAN}1{Colors.END}) Internal/AD Infrastructure")
+        print(f"  {Colors.CYAN}2{Colors.END}) External Infrastructure")
+        
+        while True:
+            choice = input(f"\n{Colors.YELLOW}Enter choice (1 or 2): {Colors.END}").strip()
+            if choice == "1":
+                scan_mode = "internal"
+                break
+            elif choice == "2":
+                scan_mode = "external"
+                break
+            else:
+                print_status("Invalid choice. Please enter 1 or 2.", "error")
+    
+    # Determine timing profile
+    if sum([args.slow, args.normal, args.aggressive]) > 1:
+        print_status("Error: Can only specify one timing profile", "error")
+        sys.exit(1)
+    elif args.slow:
+        timing = "slow"
+    elif args.aggressive:
+        timing = "aggressive"
+    else:
+        timing = "normal"
+    
+    # Collect scan types
+    scan_types = []
+    if args.top_ports:
+        scan_types.append('top_ports')
+    if args.full_scan:
+        scan_types.append('full_scan')
+    if args.smb_scan:
+        scan_types.append('smb_scan')
+    if args.ssl_scan:
+        scan_types.append('ssl_scan')
+    if args.web_scan:
+        scan_types.append('web_scan')
+    if args.vuln_scan:
+        scan_types.append('vuln_scan')
+    
+    # Validate input file
     if not os.path.exists(args.targets_file):
         print_status(f"Input file not found: {args.targets_file}", "error")
         sys.exit(1)
     
-    # Process convenience options
-    skip_ping = args.skip_ping
-    skip_fast = args.skip_fast
-    skip_full = args.skip_full
-    skip_udp = args.skip_udp
-    skip_snmp = args.skip_snmp
-    
-    if args.fast_only:
-        skip_full = True
-        skip_udp = True
-        skip_snmp = True
-        print_status("Fast-only mode: Skipping full scan, UDP scan, and SNMP check", "info")
-    
-    if args.tcp_only:
-        skip_udp = True
-        skip_snmp = True
-        print_status("TCP-only mode: Skipping UDP scan and SNMP check", "info")
-    
-    if args.udp_only:
-        skip_fast = True
-        skip_full = True
-        print_status("UDP-only mode: Skipping TCP scans", "info")
-    
-    # Validate configuration
-    if skip_fast and skip_full and skip_udp:
-        print_status("Error: Cannot skip all scan types!", "error")
-        sys.exit(1)
-    
-    # Display configuration
-    print_section_header("SCAN CONFIGURATION")
-    config_items = [
-        ("Host Discovery", "SKIP" if skip_ping else "RUN", "discovery" if not skip_ping else "warning"),
-        ("Fast Scan", "SKIP" if skip_fast else "RUN", "scan" if not skip_fast else "warning"),
-        ("Full Scan", "SKIP" if skip_full else "RUN", "scan" if not skip_full else "warning"),
-        ("UDP Scan", "SKIP" if skip_udp else "RUN", "scan" if not skip_udp else "warning"),
-        ("SNMP Check", "SKIP" if skip_snmp else "RUN", "scan" if not skip_snmp else "warning")
-    ]
-    
-    for name, status, status_type in config_items:
-        print_status(f"{name:.<20} {status}", status_type, 1)
-    
-    print("")
-    
-    scanner = NetworkScanner(
-        args.targets_file, 
-        skip_ping=skip_ping,
-        skip_fast=skip_fast,
-        skip_full=skip_full,
-        skip_udp=skip_udp,
-        skip_snmp=skip_snmp
+    # Create and run scanner
+    scanner = SecurityScanner(
+        args.targets_file,
+        scan_mode=scan_mode,
+        skip_discovery=args.skip_discovery,
+        timing=timing,
+        scan_types=scan_types if scan_types else None,
+        custom_ports=args.ports
     )
-    scanner.run_comprehensive_scan()
+    
+    try:
+        scanner.run()
+    except KeyboardInterrupt:
+        print("\n")
+        print_status("Scan interrupted by user", "warning")
+        sys.exit(1)
+    except Exception as e:
+        print_status(f"Unexpected error: {e}", "error")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
